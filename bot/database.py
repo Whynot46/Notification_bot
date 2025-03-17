@@ -184,3 +184,33 @@ async def delete_user(user_id: int):
     global db_connection
     await db_connection.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
     await db_connection.commit()
+
+
+async def add_group(group_id: int, group_name: str):
+    global db_connection
+    cursor = await db_connection.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,))
+    result = await cursor.fetchone()
+    
+    if not result:
+        await db_connection.execute("INSERT INTO groups (group_id, name) VALUES (?, ?)", (group_id, group_name))
+        await db_connection.commit()
+
+
+async def delete_group(group_id: int):
+    global db_connection
+    await db_connection.execute("DELETE FROM groups WHERE group_id = ?", (group_id,))
+    await db_connection.commit()
+
+
+async def get_group_name(group_id: int) -> str:
+    global db_connection
+    cursor = await db_connection.execute("SELECT name FROM groups WHERE group_id = ?", (group_id,))
+    result = await cursor.fetchone()
+    return result[0] if result else None
+
+
+async def get_user_name(user_id: int) -> str:
+    global db_connection
+    cursor = await db_connection.execute("SELECT firstname, lastname FROM users WHERE user_id = ?", (user_id,))
+    result = await cursor.fetchone()
+    return f"{result[0]} {result[1]}" if result else None

@@ -21,5 +21,5 @@ class Config:
     GOOGLE_REPORTS_FILE_ID = os.getenv('GOOGLE_REPORTS_FILE_ID')
     GOOGLE_DIRECTORY_ID = os.getenv('GOOGLE_DIRECTORY_ID')
     
-    def is_admin(self, user_id: int) -> bool:
-        return str(user_id) in self.ADMIN_IDS
+    def is_admin(user_id: int) -> bool:
+        return str(user_id) in Config.ADMIN_IDS

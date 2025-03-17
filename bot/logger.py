@@ -33,13 +33,6 @@ def error_handler(func):
         try:
             return await func(*args, **kwargs)
         except Exception as error:
-            # Логируем ошибку
             logger.error(f"{func.__name__}: {error}", exc_info=True)
-            
-            # Отправляем сообщение об ошибке пользователю (если есть объект Message)
-            for arg in args:
-                if isinstance(arg, Message):
-                    bot = kwargs.get("bot") or arg.bot
-                    await bot.send_message(arg.chat.id, "Произошла ошибка. Пожалуйста, попробуйте ещё раз.")
-                    break
+
     return wrapper

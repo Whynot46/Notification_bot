@@ -28,11 +28,11 @@ async def get_notification_users_list_keyboard(selected_users=None) -> InlineKey
         button_text = f"{user_data['lastname']} {user_data['firstname']}"
         if user_id in selected_users:
             button_text += " ✅"
-        users_keyboard.inline_keyboard.append([InlineKeyboardButton(text=button_text, callback_data=f"user_{user_id}")])
+        users_keyboard.inline_keyboard.append([InlineKeyboardButton(text=button_text, callback_data=f"notification_user_{user_id}")])
 
     return users_keyboard
 
-async def get_groups_list_keyboard(selected_groups=None) -> InlineKeyboardMarkup:
+async def get_notification_groups_list_keyboard(selected_groups=None) -> InlineKeyboardMarkup:
     if selected_groups is None:
         selected_groups = []
 
@@ -42,9 +42,18 @@ async def get_groups_list_keyboard(selected_groups=None) -> InlineKeyboardMarkup
         button_text = f"{group_info['name']}"
         if group_id in selected_groups:
             button_text += " ✅"
-        groups_keyboard.inline_keyboard.append([InlineKeyboardButton(text=button_text, callback_data=f"group_{group_id}")])
+        groups_keyboard.inline_keyboard.append([InlineKeyboardButton(text=button_text, callback_data=f"notification_group_{group_id}")])
     
     return groups_keyboard
+
+
+async def get_groups_list_keyboard() -> InlineKeyboardMarkup:
+    groups_dict = await db.get_all_groups()
+    groups_keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    for group_id, group_info in groups_dict.items():
+        groups_keyboard.inline_keyboard.append([InlineKeyboardButton(text=group_info['name'], callback_data=f"group_{group_id}")])
+    return groups_keyboard
+
 
 async def get_edit_notification_keyboard(notification_id: int) -> InlineKeyboardMarkup:
     edit_notification_keyboard = InlineKeyboardMarkup(
