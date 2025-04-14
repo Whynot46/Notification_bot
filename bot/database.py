@@ -38,12 +38,11 @@ async def is_old(user_id):
     return bool(result)
 
 
-#Проверка, зарегистрирован ли пользователь по ФИО
-async def is_register(firstname: str, middlename: str, lastname: str):
+async def add_user(user_id: int, firstname: str, middlename: str, lastname: str):
     global db_connection
-    cursor = await db_connection.execute("SELECT 1 FROM users WHERE firstname = ? AND middlename= ? AND lastname= ?", (firstname, middlename, lastname))
-    result = await cursor.fetchone()
-    return bool(result)
+    await db_connection.execute('''INSERT INTO users (user_id, firstname, middlename, lastname)
+                                VALUES (?, ?, ?, ?)''', (user_id, firstname, middlename, lastname))
+    await db_connection.commit()
 
 
 # Проверка, активен ли пользователь
@@ -101,6 +100,8 @@ async def add_notification(author_id: int, title: str, description: str, sender_
                                         )
     await db_connection.commit() 
     
+    return cursor.lastrowid
+    
     
 async def get_all_notifications() -> dict:
     global db_connection
@@ -147,7 +148,7 @@ async def get_author_notifications(author_id: int) -> dict:
 
 async def get_user_notifications(user_id: int) -> dict:
     global db_connection
-    cursor = await db_connection.execute("SELECT * FROM notifications WHERE recipients_ids LIKE ?", f"%{user_id}%")
+    cursor = await db_connection.execute("SELECT * FROM notifications WHERE recipients_ids LIKE ?", (f"%{user_id}%",))
     rows = await cursor.fetchall()
     notifications_dict = {}
     for row in rows:
@@ -162,7 +163,7 @@ async def get_user_notifications(user_id: int) -> dict:
             "is_repeat": is_repeat,
             "sender_weekday": sender_weekday,
             "recipients_ids": recipients_ids
-            }
+        }
     
     return notifications_dict
 

@@ -30,6 +30,16 @@ async def populate_database():
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (7348838870, "Алексей", "Дмитриевич", "Пахалев", 1, True))
 
+        await db.execute('''
+            INSERT INTO users (firstname, middlename, lastname, role_id, is_active)
+            VALUES (?, ?, ?, ?, ?)
+        ''', ("Яна", "Салтовская", "Тестовая", 1, True))
+
+        await db.execute('''
+            INSERT INTO users (firstname, middlename, lastname, role_id, is_active)
+            VALUES (?, ?, ?, ?, ?)
+        ''', ("Тест", "Тестович", "Тестовый", 1, True))
+
         await db.commit()
 
 

@@ -25,7 +25,7 @@ async def create_table():
         await db.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER UNIQUE NOT NULL,
+                user_id INTEGER UNIQUE,
                 firstname TEXT NOT NULL,
                 middlename TEXT,
                 lastname TEXT NOT NULL,

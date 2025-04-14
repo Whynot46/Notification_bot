@@ -3,16 +3,18 @@ from aiogram import F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ChatMemberUpdated
-from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_MEMBER, KICKED, LEFT, RESTRICTED, ADMINISTRATOR, CREATOR
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.enums import ChatType
 import bot.keyboards as kb
 import bot.database as db
 from bot.states import *
 from bot.logger import error_handler, logger
 from bot.config import Config
+import bot.scheduler as scheduler
 import re
 import ast
+from datetime import datetime
+
 
 
 router = Router()
@@ -46,12 +48,9 @@ async def registration(message: Message, state: FSMContext):
     register_data = await state.get_data()
     if re.match(r"^[А-ЯЁа-яёA-Za-z]+(?:-[А-ЯЁа-яёA-Za-z]+)?\s[А-ЯЁа-яёA-Za-z]+(?:-[А-ЯЁа-яёA-Za-z]+)?\s[А-ЯЁа-яёA-Za-z]+(?:-[А-ЯЁа-яёA-Za-z]+)?$", message.text):
         lastname, firstname, middlename = (register_data["fullname"]).split(" ")
-        if await db.is_register(firstname, middlename, lastname):
-            await db.update_user_id(message.from_user.id, firstname, middlename, lastname)
-            await message.answer(f"Приветствую Вас, {register_data['fullname']}!", reply_markup=await kb.get_main_menu_keyboard(message.from_user.id))
-            await state.clear()
-        else:
-            await message.answer("Мой руководитель не вводил тебя в свой справочник 😑")
+        await db.add_user(message.from_user.id, firstname, middlename, lastname)
+        await message.answer(f"Приветствую Вас, {register_data['fullname']}!", reply_markup=await kb.get_main_menu_keyboard(message.from_user.id))
+        await state.clear()
     else:
         await message.answer("😬 Некорректный формат ФИО!")
         await state.set_state(Register_steps.fullname)
@@ -64,10 +63,8 @@ async def get_routeam_notifications(message: Message):
         notifications_dict = await db.get_all_notifications()
         if len(notifications_dict) > 0:
             for notification_id, notification_data in notifications_dict.items():
-                # Преобразуем строку recipients_ids в словарь
                 recipients_ids = ast.literal_eval(notification_data['recipients_ids'])
                 
-                # Обрабатываем пользователей
                 user_ids = recipients_ids.get('users', [])
                 user_names = []
                 for user_id in user_ids:
@@ -75,7 +72,6 @@ async def get_routeam_notifications(message: Message):
                     if fullname:
                         user_names.append(fullname)
                 
-                # Обрабатываем группы
                 group_ids = recipients_ids.get('groups', [])
                 group_names = []
                 for group_id in group_ids:
@@ -83,14 +79,12 @@ async def get_routeam_notifications(message: Message):
                     if group_name:
                         group_names.append(group_name)
                 
-                # Формируем строку с получателями
                 recipients_str = ""
                 if user_names:
                     recipients_str += f"Пользователи: {', '.join(user_names)}\n"
                 if group_names:
                     recipients_str += f"Группы: {', '.join(group_names)}\n"
                 
-                # Формируем текст напоминания
                 notification_text = (
                     f"Напоминание ID: {notification_id}\n"
                     f"Название: {notification_data['title']}\n"
@@ -100,14 +94,11 @@ async def get_routeam_notifications(message: Message):
                     f"Повторение: {'Да' if notification_data['is_repeat'] else 'Нет'}\n"
                 )
 
-                # Добавляем дни недели, если они есть
                 if notification_data['sender_weekday'] != "None":
                     notification_text += f"Дни недели: {notification_data['sender_weekday']}\n"
 
-                # Добавляем получателей
                 notification_text += f"Получатели: {recipients_str if recipients_str else 'Нет получателей'}"
                 
-                # Отправляем сообщение с информацией о напоминании
                 await message.answer(notification_text, reply_markup=await kb.get_edit_notification_keyboard(notification_id))
         else:
             await message.answer("Ваш верный слуга сидит без работы😔\nВ моём блокноте нет ни одной записи о напоминаниях")
@@ -116,7 +107,10 @@ async def get_routeam_notifications(message: Message):
 @router.message(F.text == "🧑🏻‍💻Мои напоминания")
 async def get_user_notifications(message: Message):
     if Config.is_admin(message.from_user.id):
-        notifications_dict = await db.get_author_notifications(message.from_user.id)
+        author_notifications_dict = await db.get_author_notifications(message.from_user.id)
+        user_notifications_dict = await db.get_user_notifications(message.from_user.id)
+        notifications_dict = {**author_notifications_dict, **user_notifications_dict}
+
         if len(notifications_dict) > 0:
             for notification_id, notification_data in notifications_dict.items():
                 recipients_ids = ast.literal_eval(notification_data['recipients_ids'])
@@ -160,7 +154,7 @@ async def get_user_notifications(message: Message):
 
 
 @router.message(F.text == "👥Пользователи и группы")
-async def get_user_notifications(message: Message, state: FSMContext):
+async def get_user_notifications(message: Message):
     if Config.is_admin(message.from_user.id):
         users_dict = await db.get_all_users_dict()
         groups_dict = await db.get_all_groups()
@@ -193,29 +187,61 @@ async def set_notification_title(message: Message, state: FSMContext):
 async def set_notification_description(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
     await state.set_state(Notification_create_steps.sender_date)
-    await message.answer("Укажите дату напоминания", reply_markup=await kb.remove_keyboard())
+    await message.answer("Укажите дату напоминания", reply_markup=await kb.get_date_keyboard())
 
 
 @router.message(Notification_create_steps.sender_date)
 async def set_notification_sender_date(message: Message, state: FSMContext):
-    if re.match(r"^(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|1[0-2])\.\d{4}$", message.text):
-        await state.update_data(sender_date=message.text)
+    if re.match(r"^(Сегодня|Завтра|Понедельник|Вторник|Среда|Четверг|Пятница|Суббота|Воскресенье) \d{2}\.\d{2}\.\d{4}$", message.text):
+        date_str = message.text.split(" ")[-1]
+        input_date = datetime.strptime(date_str, "%d.%m.%Y").date()
+        current_date = datetime.now().date()
+
+        if input_date < current_date:
+            await message.answer("😬 Нельзя указать прошедшую дату! Введите дату в формате ДД.ММ.ГГГГ:")
+            return
+
+        await state.update_data(sender_date=date_str)
         await state.set_state(Notification_create_steps.sender_time)
-        await message.answer("Укажите время напоминания", reply_markup=await kb.get_time_keyboard())
+        
+        await message.answer("Укажите время напоминания", reply_markup=await kb.get_time_keyboard(date_str))
     else:
-        await state.set_state(Notification_create_steps.sender_date)
-        await message.answer("😬 Введите дату в формате ДД.ММ.ГГГГ")
+        if re.match(r"^(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|1[0-2])\.\d{4}$", message.text):
+            input_date = datetime.strptime(message.text, "%d.%m.%Y").date()
+            current_date = datetime.now().date()
+
+            if input_date < current_date:
+                await message.answer("😬 Нельзя указать прошедшую дату! Введите дату в формате ДД.ММ.ГГГГ:")
+                return
+
+            await state.update_data(sender_date=message.text)
+            await state.set_state(Notification_create_steps.sender_time)
+            
+            await message.answer("Укажите время напоминания", reply_markup=await kb.get_time_keyboard(message.text))
+        else:
+            await message.answer("😬 Некорректный формат даты! Выберите дату из предложенных ниже:", reply_markup=await kb.get_date_keyboard())
 
 
 @router.message(Notification_create_steps.sender_time)
 async def set_notification_sender_time(message: Message, state: FSMContext):
     if re.match(r"^([01]?[0-9]|2[0-3]):[0-5][0-9]$", message.text):
+        current_datetime = datetime.now()
+        input_time = datetime.strptime(message.text, "%H:%M").time()
+
+        data = await state.get_data()
+        input_date = datetime.strptime(data["sender_date"], "%d.%m.%Y").date()
+
+        input_datetime = datetime.combine(input_date, input_time)
+
+        if input_datetime < current_datetime:
+            await message.answer("😬 Нельзя указать прошедшее время! Введите время в формате ЧЧ:ММ")
+            return
+
         await state.update_data(sender_time=message.text)
         await state.set_state(Notification_create_steps.is_repeat)
         await message.answer("Нужно ли повторять напоминание?", reply_markup=await kb.get_confirm_keyboard())
     else:
-        await state.set_state(Notification_create_steps.sender_time)
-        await message.answer("😬 Введите время в формате ЧЧ:ММ")
+        await message.answer("😬 Некорректный формат времени! Введите время в формате ЧЧ:ММ")
 
 
 @router.message(Notification_create_steps.is_repeat)
@@ -248,6 +274,7 @@ async def handle_weekday_continue(message: Message, state: FSMContext):
 
     await state.set_state(Notification_create_steps.recipient_type)
     await message.answer("Куда отправить напоминание?", reply_markup=await kb.get_recipient_type_keyboard())
+
 
 @router.callback_query(F.data.startswith("weekday_"))
 async def handle_weekday_selection(callback: CallbackQuery, state: FSMContext):
@@ -291,19 +318,15 @@ async def handle_user_selection(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     selected_users = data.get("selected_users", [])
 
-    # Проверяем, был ли пользователь уже выбран
     if user_id in selected_users:
-        selected_users.remove(user_id)  # Убираем пользователя из выбранных
+        selected_users.remove(user_id) 
     else:
-        selected_users.append(user_id)  # Добавляем пользователя в выбранные
+        selected_users.append(user_id) 
 
-    # Обновляем состояние
     await state.update_data(selected_users=selected_users)
 
-    # Получаем текущую разметку
     current_keyboard = callback.message.reply_markup.inline_keyboard
 
-    # Создаем новую разметку
     new_keyboard = []
     for row in current_keyboard:
         new_row = []
@@ -311,7 +334,6 @@ async def handle_user_selection(callback: CallbackQuery, state: FSMContext):
             button_text = button.text
             button_data = button.callback_data
 
-            # Если это кнопка выбранного пользователя, добавляем/убираем ✅
             if button_data == f"notification_user_{user_id}":
                 if user_id in selected_users:
                     button_text = f"{button_text} ✅"
@@ -321,11 +343,9 @@ async def handle_user_selection(callback: CallbackQuery, state: FSMContext):
             new_row.append(InlineKeyboardButton(text=button_text, callback_data=button_data))
         new_keyboard.append(new_row)
 
-    # Проверяем, изменилась ли разметка
     if new_keyboard != current_keyboard:
         await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_keyboard))
     else:
-        # Если разметка не изменилась, просто отвечаем на callback
         await callback.answer()
 
     await callback.answer()
@@ -407,21 +427,18 @@ async def handle_spare_user(callback: CallbackQuery):
     
 
 @router.message(Notification_create_steps.recipients_ids, F.text == "Создать")
-async def handle_recipients_continue(message: Message, state: FSMContext):
+async def handle_recipients_continue(message: Message, bot: Bot, state: FSMContext):
     data = await state.get_data()
     selected_users = data.get("selected_users", [])
     selected_groups = data.get("selected_groups", [])
     recipient_type = data.get("recipient_type", "")
 
-    # Проверяем, что хотя бы один получатель выбран
     if not selected_users and not selected_groups:
         await message.answer("Выберите хотя бы одного получателя!")
         return
 
-    # Обновляем состояние с выбранными получателями
     await state.update_data(recipients_ids={"users": selected_users, "groups": selected_groups})
 
-    # Создаем текст напоминания
     notification_data_str = (
         f"Напоминание {data['title']} успешно создано!\n"
         f"Описание: {data['description']}\n"
@@ -434,17 +451,14 @@ async def handle_recipients_continue(message: Message, state: FSMContext):
 
     if recipient_type == "В личные сообщения":
         users_names = [await db.get_user_name(user_id) for user_id in selected_users]
-        notification_data_str += f"Выбранные пользователи: {users_names}\n"
+        notification_data_str += f"Выбранные пользователи: {', '.join(users_names)}\n"
     elif recipient_type == "В группу":
         group_names = [await db.get_group_name(group_id) for group_id in selected_groups]
-        group_names_str = ", ".join(group_names)
-        notification_data_str += f"Выбранные группы: {group_names_str}\n"
+        notification_data_str += f"Выбранные группы: {', '.join(group_names)}\n"
 
-    # Отправляем сообщение с информацией о напоминании
     await message.answer(notification_data_str, reply_markup=await kb.get_main_menu_keyboard(message.from_user.id))
 
-    # Сохраняем напоминание в базу данных
-    await db.add_notification(
+    notification_id = await db.add_notification(
         author_id=message.from_user.id,
         title=data['title'],
         description=data['description'],
@@ -455,16 +469,29 @@ async def handle_recipients_continue(message: Message, state: FSMContext):
         recipients_ids={"users": selected_users, "groups": selected_groups},
     )
 
-    # Очищаем состояние
+    await scheduler.add_notification(
+        bot=bot,
+        notification_id=notification_id,
+        title=data['title'],
+        description=data['description'],
+        sender_date=data['sender_date'],
+        sender_time=data['sender_time'],
+        sender_weekday=data['sender_weekday'] if data['is_repeat'] else None,
+        recipients_ids={"users": tuple(selected_users), "groups": tuple(selected_groups)},  # Исправлено
+    )
+
     await state.clear()
 
 
 @router.callback_query(F.data.startswith("delete_notification_"))
 async def handle_delete_notification(callback: CallbackQuery):
-    notification_id = int(callback.data.split("_")[2])
-    await db.delete_notification(notification_id)
-    await callback.answer(f"Напоминание {notification_id} удалено.")
-    await callback.message.delete()
-
-
-    
+    try:
+        notification_id = int(callback.data.split("_")[2])
+        await db.delete_notification(notification_id)
+        scheduler.scheduler.remove_job(str(notification_id))
+        await callback.answer(f"Напоминание {notification_id} удалено.")
+        await callback.message.delete()
+    except Exception as error:
+        logger.error(f"Ошибка при удалении напоминания id={notification_id}: {error}")
+                               
+                        
